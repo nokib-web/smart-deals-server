@@ -1,9 +1,20 @@
 const express = require('express')
 const cors = require('cors')
 require('dotenv').config();
+const iwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express()
+var admin = require("firebase-admin");
 const port = process.env.PORT || 3000
+
+
+
+var serviceAccount = require("./smart-deals-firebase-adminSDK.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
 
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.9bjil3c.mongodb.net/?appName=Cluster0`;
@@ -23,24 +34,33 @@ app.use(cors());
 app.use(express.json())
 
 
-const logger =(req, res, next)=>{
+const logger = (req, res, next) => {
     console.log('logging info')
     next()
 }
 
 
 
-const verifyFirebaseToken = (req, res, next)=>{
-    console.log('in the verify middleware', req.headers.authorizations)
-    if(!req.headers.authorizations){
-        return res.status(401).send({message:' unauthorize access'})
+const verifyFirebaseToken = async (req, res, next) => {
+    console.log('in the verify middleware', req.headers.authorization)
+    if (!req.headers.authorization) {
+        return res.status(401).send({ message: ' unauthorize access' })
     }
-    const token = req.headers.authorizations.split(' ')[1]
-    if(!token){
-        return res.status(401).send({message:' unauthorize access'})
+    const token = req.headers.authorization.split(' ')[1]
+    if (!token) {
+        return res.status(401).send({ message: ' unauthorize access' })
     }
-    
-    next()
+    try {
+        const userInfo = await admin.auth().verifyIdToken(token);
+        req.token_email = userInfo.email;
+        console.log('after token validation ', userInfo)
+        next()
+    }
+    catch {
+        return res.status(401).send({ message: ' unauthorize access' })
+    }
+
+
 }
 
 
@@ -61,6 +81,13 @@ async function run() {
         const productsCollection = db.collection('products')
         const bidsCollection = db.collection('bids');
         const userCollection = db.collection('users')
+
+        // jwt re related api
+        app.post ('/getToken',(req,res)=>{
+            const loggedUser = req.body;
+            const token = jwt.sign({loggedUser}, process.env.JWT_SECRET, {expiresIn: '1h'})
+            res.send({token:token})
+        })
 
         // Users api
         app.post('/users', async (req, res) => {
@@ -156,13 +183,16 @@ async function run() {
 
         // bids related api
 
-        app.get('/bids',logger,verifyFirebaseToken, async (req, res) => {
+        app.get('/bids', logger, verifyFirebaseToken, async (req, res) => {
 
             console.log('headers', req.headers)
 
             const email = req.query.email;
             const query = {}
             if (email) {
+                if(email !==req.token_email){
+                    return res.status(403).send({message: ' forbidden access'})
+                }
                 query.buyer_email = email;
             }
             const cursor = bidsCollection.find(query);
@@ -170,7 +200,7 @@ async function run() {
             res.send(result)
         });
 
-        app.get('/products/bids/:productId', async (req, res) => {
+        app.get('/products/bids/:productId', verifyFirebaseToken, async (req, res) => {
             const productId = req.params.productId;
             const query = { product: productId }
             const cursor = bidsCollection.find(query).sort((a, b) => b.bid_price - a.bid_Price);
