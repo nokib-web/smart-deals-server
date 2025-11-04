@@ -22,6 +22,31 @@ const client = new MongoClient(uri, {
 app.use(cors());
 app.use(express.json())
 
+
+const logger =(req, res, next)=>{
+    console.log('logging info')
+    next()
+}
+
+
+
+const verifyFirebaseToken = (req, res, next)=>{
+    console.log('in the verify middleware', req.headers.authorizations)
+    if(!req.headers.authorizations){
+        return res.status(401).send({message:' unauthorize access'})
+    }
+    const token = req.headers.authorizations.split(' ')[1]
+    if(!token){
+        return res.status(401).send({message:' unauthorize access'})
+    }
+    
+    next()
+}
+
+
+
+
+
 app.get('/', (req, res) => {
     res.send('Hello World!')
 })
@@ -131,7 +156,9 @@ async function run() {
 
         // bids related api
 
-        app.get('/bids', async (req, res) => {
+        app.get('/bids',logger,verifyFirebaseToken, async (req, res) => {
+
+            console.log('headers', req.headers)
 
             const email = req.query.email;
             const query = {}
@@ -150,18 +177,6 @@ async function run() {
             const result = await cursor.toArray();
             res.send(result);
         });
-
-
-        app.get('/bids', async (req, res) => {
-            const query = {};
-            if (query.email) {
-                query.buyer_email = email;
-            }
-            const cursor = bidsCollection.find(query);
-            const result = await cursor.toArray();
-            res.send(result);
-
-        })
 
 
 
